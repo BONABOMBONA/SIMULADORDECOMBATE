@@ -152,8 +152,10 @@ def _universo_de(datos):
         return "Pokemon"
     if "scrapethissite" in fuente:
         return "Pais"
-    if "superhero" in fuente:
+    if "superhero" in fuente or "tashapiro" in fuente:
         return "Superheroe"
+    if "leagueoflegends" in fuente or "/lol" in fuente:
+        return "LoL"
     if fuente == "manual":
         return "manual"
     if fuente == "texto_libre":

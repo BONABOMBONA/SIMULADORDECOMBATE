@@ -14,11 +14,91 @@ from bs4 import BeautifulSoup
 CABECERAS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/120.0 Safari/537.36"
+                  "Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+              "image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
 }
 
 
+def _descargar_fandom_api(url, timeout=20):
+    """
+    Descarga el contenido de una pagina de Fandom usando la API de MediaWiki,
+    que no da error 403 como la pagina normal. Devuelve el HTML de la tabla.
+    """
+    try:
+        # Sacar el titulo de la pagina de la URL
+        # ej: .../wiki/List_of_champions/Base_statistics -> ese es el titulo
+        titulo = url.split("/wiki/")[1]
+    except IndexError:
+        return None
+
+    # El dominio base (ej. https://leagueoflegends.fandom.com)
+    base = url.split("/wiki/")[0]
+    api = base + "/api.php"
+
+    parametros = {
+        "action": "parse",
+        "page": titulo,
+        "format": "json",
+        "prop": "text",
+    }
+    try:
+        r = requests.get(api, params=parametros, headers=CABECERAS, timeout=timeout)
+        r.raise_for_status()
+        datos = r.json()
+        return datos["parse"]["text"]["*"]
+    except Exception as e:
+        print(f"[LoL] Fallo la API de Fandom: {e}")
+        return None
+
+
+def _detectar_tipo(url):
+    """
+    Detecta automaticamente el tipo de fuente segun la URL.
+    Sirve para que el LINK MANUAL use el parser correcto sin que el
+    usuario tenga que elegir el tipo.
+    """
+    u = url.lower()
+    if "pokemondb" in u:
+        return "pokemon"
+    if "scrapethissite" in u:
+        return "paises"
+    if "superhero" in u or "tashapiro" in u:
+        return "superheroes"
+    if "leagueoflegends" in u or "lol" in u:
+        return "lol"
+    return None
+
+
 def scrapear(url, tipo=None, timeout=20):
+    # Si no se especifico el tipo (ej. link manual), detectarlo por la URL
+    if tipo is None:
+        tipo = _detectar_tipo(url)
+
+    # Fandom bloquea el scraping normal (error 403). Para esas paginas usamos
+    # la API de MediaWiki, que SI permite acceso y devuelve el HTML de la tabla.
+    if tipo == "lol" and "fandom.com" in url:
+        html = _descargar_fandom_api(url, timeout)
+        if html is None:
+            print(f"[ERROR] No se pudo acceder a {url} (ni por API)")
+            return []
+        soup = BeautifulSoup(html, "html.parser")
+        registros = _parsear_lol(soup)
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for r in registros:
+            r["fuente_url"] = url
+            r["fecha_extraccion"] = fecha
+        print(f"[OK] {len(registros)} personajes extraidos de {url}")
+        return registros
+
     try:
         respuesta = requests.get(url, headers=CABECERAS, timeout=timeout)
         respuesta.raise_for_status()
@@ -35,6 +115,11 @@ def scrapear(url, tipo=None, timeout=20):
             registros = _parsear_pokemon(soup)
         elif tipo == "paises":
             registros = _parsear_paises(soup)
+        elif tipo == "lol":
+            registros = _parsear_lol(soup)
+            if not registros:
+                # Respaldo: si el parser especifico fallo, intentar el generico
+                registros = _parsear_generico(soup)
         else:
             registros = _parsear_generico(soup)
 
@@ -119,6 +204,88 @@ def _parsear_superheroes_csv(texto_csv):
             vistos.add(nombre)
             registros.append({"nombre": nombre, "tipo": "superheroes",
                               "stats_crudos": stats})
+    return registros
+
+
+def _parsear_lol(soup):
+    """
+    Extrae campeones de League of Legends (leagueoflegends.fandom.com).
+    Busca la tabla con columnas HP/AD/AR/MS y saca el nombre del campeon
+    del primer enlace que tenga texto (ignorando imagenes).
+    """
+    registros = []
+
+    # Buscar entre TODAS las tablas la que tenga los encabezados de stats
+    tabla_buena = None
+    indices = {}
+    todas = soup.find_all("table")
+    print(f"[LoL] Tablas encontradas en la pagina: {len(todas)}")
+    for n_tabla, tabla in enumerate(todas):
+        filas = tabla.find_all("tr")
+        if not filas:
+            continue
+        encabezados = [c.get_text(strip=True).lower()
+                       for c in filas[0].find_all(["th", "td"])]
+        if encabezados:
+            print(f"[LoL] Tabla {n_tabla}: encabezados = {encabezados[:6]}...")
+        idx = {}
+        for i, h in enumerate(encabezados):
+            if h == "hp" and "hp" not in idx:
+                idx["hp"] = i
+            elif h == "ad" and "ataque" not in idx:
+                idx["ataque"] = i
+            elif h == "ar" and "defensa" not in idx:
+                idx["defensa"] = i
+            elif h == "ms" and "velocidad" not in idx:
+                idx["velocidad"] = i
+        if len(idx) == 4:
+            tabla_buena = tabla
+            indices = idx
+            break
+
+    if not tabla_buena:
+        print("[LoL] NO se encontro una tabla con columnas HP/AD/AR/MS")
+        return registros
+
+    print(f"[LoL] Tabla de stats encontrada. Columnas: {indices}")
+    filas = tabla_buena.find_all("tr")
+    for fila in filas[1:]:
+        celdas = fila.find_all(["td", "th"])
+        if len(celdas) <= max(indices.values()):
+            continue
+
+        # --- Sacar el nombre de la primera celda ---
+        primera = celdas[0]
+        nombre = ""
+        # Recorrer los enlaces y tomar el primero que tenga texto real
+        for enlace in primera.find_all("a"):
+            texto = enlace.get_text(strip=True)
+            if texto:
+                nombre = texto
+                break
+        # Si ningun enlace tenia texto, usar todo el texto de la celda
+        if not nombre:
+            nombre = primera.get_text(strip=True)
+        nombre = nombre.strip()
+        if not nombre:
+            continue
+
+        def num(celda):
+            txt = celda.get_text(strip=True).replace("+", "").replace("%", "").replace(",", "")
+            try:
+                return float(txt)
+            except ValueError:
+                return None
+
+        hp = num(celdas[indices["hp"]])
+        ad = num(celdas[indices["ataque"]])
+        ar = num(celdas[indices["defensa"]])
+        ms = num(celdas[indices["velocidad"]])
+        if None in (hp, ad, ar, ms):
+            continue
+        registros.append({"nombre": nombre, "tipo": "lol",
+                          "stats_crudos": {"hp": hp, "ataque": ad,
+                                           "defensa": ar, "velocidad": ms}})
     return registros
 
 

@@ -24,6 +24,9 @@ def _mapear_registro(registro):
         densidad = poblacion / area
         return {"hp": poblacion, "ataque": area,
                 "defensa": densidad, "velocidad": 1.0 / area}
+    elif tipo == "lol":
+        return {"hp": s.get("hp", 0), "ataque": s.get("ataque", 0),
+                "defensa": s.get("defensa", 0), "velocidad": s.get("velocidad", 0)}
     else:
         valores = list(s.values())
         while len(valores) < 4:
