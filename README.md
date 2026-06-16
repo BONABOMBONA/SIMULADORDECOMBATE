@@ -95,10 +95,3 @@ simulador_combate/
 └── salidas/                 # Archivos generados (CSV, graficas, informe)
 ```
 
-## Temario cubierto (Unidad III)
-
-- 3.1.1 Clasificacion -> `ml/clasificacion.py`
-- 3.1.2 Regresion -> `ml/regresion.py`
-- 3.2.1 Analisis de grupos -> `ml/clustering.py`
-- 3.3.1 / 3.3.2 RDD y transformaciones -> `spark/rdd_procesamiento.py`
-- 3.3.3 SparkSQL y SparkMLlib -> `spark/spark_sql_mllib.py`
