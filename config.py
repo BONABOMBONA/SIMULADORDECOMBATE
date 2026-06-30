@@ -26,7 +26,6 @@ CARPETA_GRAFICAS = os.path.join(CARPETA_SALIDAS, "graficas")
 
 RUTA_PERSONAJES_CSV = os.path.join(CARPETA_SALIDAS, "personajes_scrapeados.csv")
 RUTA_COMBATES_CSV = os.path.join(CARPETA_SALIDAS, "combates.csv")
-RUTA_INFORME = os.path.join(CARPETA_SALIDAS, "informe_final.pdf")
 
 # ==============================================================
 #   PARAMETROS DE SIMULACION Y ML

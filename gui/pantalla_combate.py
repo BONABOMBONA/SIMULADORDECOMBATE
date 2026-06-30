@@ -200,9 +200,19 @@ class PantallaCombate(ctk.CTkFrame):
         self.sel_a.refrescar()
         self.sel_b.refrescar()
 
-        ctk.CTkButton(self.zona, text="Pelear", command=self._pelear,
+        # Botones de accion: pelear (combate completo) y solo probabilidad (ML)
+        botones = ctk.CTkFrame(self.zona, fg_color="transparent")
+        botones.pack(pady=24)
+
+        ctk.CTkButton(botones, text="Pelear", command=self._pelear,
                       width=200, height=50,
-                      font=ctk.CTkFont(size=18, weight="bold")).pack(pady=24)
+                      font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(0, 10))
+
+        ctk.CTkButton(botones, text="Ver probabilidad (ML)",
+                      command=self._solo_probabilidad,
+                      width=200, height=42,
+                      fg_color="#2D5F8A", hover_color="#24506F",
+                      font=ctk.CTkFont(size=15, weight="bold")).pack()
 
     def refrescar_personajes(self):
         # Al volver a esta pestana, regresar a la pantalla de seleccion
@@ -244,6 +254,31 @@ class PantallaCombate(ctk.CTkFrame):
         # Ir directo a la animacion (sin pantalla de probabilidades)
         self.mostrar_animacion()
 
+    def _solo_probabilidad(self):
+        """
+        Valida la seleccion y muestra UNICAMENTE las probabilidades que da el
+        modelo de Machine Learning, sin correr el combate ni la animacion.
+        """
+        if len(self.app.personajes) < 2:
+            messagebox.showwarning("Faltan personajes",
+                                   "Agrega al menos 2 personajes en la pestana de Personajes.")
+            return
+        nombre_a = self.sel_a.seleccionado
+        nombre_b = self.sel_b.seleccionado
+        if not nombre_a or not nombre_b:
+            messagebox.showwarning("Elige peleadores",
+                                   "Busca y selecciona un peleador en cada lado.")
+            return
+        if nombre_a == nombre_b:
+            messagebox.showwarning("Mismo personaje", "Elige dos peleadores distintos.")
+            return
+        self.pa = self.app.crear_personaje(nombre_a)
+        self.pb = self.app.crear_personaje(nombre_b)
+        if self.pa is None or self.pb is None:
+            messagebox.showerror("Error", "No se encontro alguno de los personajes.")
+            return
+        self.mostrar_solo_probabilidades()
+
     # ==========================================================
     #   PANTALLA 2: PROBABILIDADES
     # ==========================================================
@@ -271,6 +306,68 @@ class PantallaCombate(ctk.CTkFrame):
                      text_color="gray").pack()
 
         self.app.despues(self.mostrar_animacion, 2800)
+
+    def mostrar_solo_probabilidades(self):
+        """
+        Mini-analisis del enfrentamiento con los modelos de Machine Learning,
+        SIN correr el combate:
+          - probabilidad de victoria de cada uno (clasificacion, RandomForest)
+          - tipo de cada personaje (clustering KMeans)
+          - duracion estimada del combate en turnos (regresion)
+        """
+        self._limpiar()
+        prob_a, prob_b = self.app.calcular_probabilidades(self.pa, self.pb)
+        favorito = self.pa.nombre if prob_a >= prob_b else self.pb.nombre
+        turnos = self.app.estimar_turnos(self.pa, self.pb)
+        tipo_a = self.app.tipo_de(self.pa.nombre)
+        tipo_b = self.app.tipo_de(self.pb.nombre)
+
+        ctk.CTkLabel(self.zona, text="Analisis del combate",
+                     font=ctk.CTkFont(size=24, weight="bold")).pack(pady=(40, 26))
+
+        # --- Probabilidad + tipo de cada peleador ---
+        fila = ctk.CTkFrame(self.zona, fg_color="transparent")
+        fila.pack(pady=6)
+        ctk.CTkLabel(fila, text=f"{self.pa.nombre}\n{prob_a}%",
+                     text_color="#4C9AFF",
+                     font=ctk.CTkFont(size=28, weight="bold")).grid(row=0, column=0, padx=50)
+        ctk.CTkLabel(fila, text="vs",
+                     font=ctk.CTkFont(size=18)).grid(row=0, column=1, padx=10)
+        ctk.CTkLabel(fila, text=f"{self.pb.nombre}\n{prob_b}%",
+                     text_color="#FF6B6B",
+                     font=ctk.CTkFont(size=28, weight="bold")).grid(row=0, column=2, padx=50)
+        # Tipo (clustering) debajo de cada nombre
+        ctk.CTkLabel(fila, text=f"Tipo: {tipo_a}", text_color="gray",
+                     font=ctk.CTkFont(size=13)).grid(row=1, column=0, pady=(2, 0))
+        ctk.CTkLabel(fila, text=f"Tipo: {tipo_b}", text_color="gray",
+                     font=ctk.CTkFont(size=13)).grid(row=1, column=2, pady=(2, 0))
+
+        barra = ctk.CTkProgressBar(self.zona, width=460, height=18)
+        barra.set(prob_a / 100)
+        barra.pack(pady=22)
+
+        ctk.CTkLabel(self.zona, text=f"Favorito: {favorito}",
+                     font=ctk.CTkFont(size=16, weight="bold")).pack()
+
+        # --- Duracion estimada (regresion) ---
+        if turnos is not None:
+            txt_turnos = f"Duracion estimada del combate: ~{turnos} turnos"
+        else:
+            txt_turnos = "Duracion estimada: (modelo entrenando...)"
+        ctk.CTkLabel(self.zona, text=txt_turnos,
+                     font=ctk.CTkFont(size=15)).pack(pady=(10, 4))
+
+        # Botones: volver a elegir o pasar directo al combate con estos dos
+        botones = ctk.CTkFrame(self.zona, fg_color="transparent")
+        botones.pack(pady=24)
+        ctk.CTkButton(botones, text="Volver",
+                      command=self.mostrar_seleccion,
+                      width=150, height=44,
+                      fg_color="#444444", hover_color="#333333").grid(row=0, column=0, padx=10)
+        ctk.CTkButton(botones, text="Pelear",
+                      command=self.mostrar_animacion,
+                      width=150, height=44,
+                      font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=1, padx=10)
 
     # ==========================================================
     #   PANTALLA 3: ANIMACION

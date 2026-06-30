@@ -1,11 +1,10 @@
 """
 analisis_completo.py
-Corre TODO el pipeline de analisis y genera el informe final en PDF.
+Corre TODO el pipeline de analisis (ML + Spark) y genera las graficas.
 
 Este script es util para DEMOSTRAR el machine learning y Spark (que en la
 GUI quedan ocultos). Lee los personajes de Mongo, corre la simulacion
-masiva, entrena los modelos, procesa con Spark, genera las graficas y
-arma el informe.
+masiva, entrena los modelos, procesa con Spark y genera las graficas.
 
 Uso:
     python3 analisis_completo.py
@@ -18,7 +17,6 @@ from simulador.personaje import Personaje
 from simulador.generador import simular_muchos, guardar_csv
 from ml import clasificacion, regresion, clustering
 from visualizacion import graficas
-from reporte import generador_reporte
 
 
 def obtener_personajes():
@@ -93,20 +91,9 @@ def main():
     g2 = graficas.grafica_clusters(df_grupos)
     g3 = graficas.matriz_confusion(matriz)
 
-    # 6. Informe
-    print("\n[5] Generando informe PDF...")
-    datos = {
-        "n_personajes": len(personajes), "fuentes": fuentes,
-        "n_combates": len(df), "precision_clf": f"{precision:.1%}",
-        "mae_reg": f"{mae:.2f}", "r2_reg": f"{r2:.2f}",
-        "resumen_grupos": resumen.to_string(),
-        "spark_sql": spark_sql, "precision_mllib": precision_mllib,
-        "graficas": [g1, g2, g3],
-    }
-    generador_reporte.generar_informe(datos, config.RUTA_INFORME)
-
     print("\n" + "=" * 55)
-    print(f"  LISTO. Informe en: {config.RUTA_INFORME}")
+    print("  LISTO. Pipeline de ML + Spark completado.")
+    print(f"  Graficas: {g1}, {g2}, {g3}")
     print("=" * 55)
 
 

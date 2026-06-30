@@ -17,7 +17,7 @@ import customtkinter as ctk
 
 from simulador.personaje import Personaje
 from simulador.generador import simular_muchos
-from ml import clasificacion
+from ml import clasificacion, regresion, clustering
 import config
 
 # Intentar usar Mongo, pero no romper si no se puede conectar
@@ -38,7 +38,12 @@ class App(ctk.CTk):
 
         # Estado
         self.personajes = []        # lista de dicts de personajes
-        self.modelo_clf = None      # modelo de ML (oculto)
+        self.modelo_clf = None      # clasificacion: quien gana (alimenta probabilidades)
+        self.modelo_reg = None      # regresion: cuantos turnos dura el combate
+        self.tipos = {}             # clustering: {nombre -> tipo} (Atacante, Veloz, ...)
+        self.precision_clf = None   # precision del clasificador de scikit-learn
+        self.precision_mllib = None # precision del clasificador de Spark MLlib (perezoso)
+        self._mllib_calculando = False
 
         self._construir()
         self._cargar_personajes_iniciales()
@@ -155,6 +160,10 @@ class App(ctk.CTk):
         # Vaciar la memoria y el modelo
         self.personajes = []
         self.modelo_clf = None
+        self.modelo_reg = None
+        self.tipos = {}
+        self.precision_clf = None
+        self.precision_mllib = None
         self._actualizar_estado()
 
     # ----------------------------------------------------------
@@ -175,8 +184,20 @@ class App(ctk.CTk):
                 registros = simular_muchos(objetos, n_combates=config.N_COMBATES_MASIVA,
                                            semilla=config.SEMILLA)
                 df = pd.DataFrame(registros)
-                modelo, _, _, _ = clasificacion.entrenar(df)
+
+                # Clasificacion (quien gana) -> alimenta las probabilidades
+                modelo, precision, _, _ = clasificacion.entrenar(df)
                 self.modelo_clf = modelo
+                self.precision_clf = precision
+
+                # Regresion (cuantos turnos dura el combate)
+                self.modelo_reg, _, _, _ = regresion.entrenar(df)
+
+                # Clustering (tipo de cada personaje segun sus stats)
+                df_pers = pd.DataFrame(self.personajes)
+                df_grupos, _, _ = clustering.agrupar(df_pers, n_grupos=3)
+                self.tipos = dict(zip(df_grupos["nombre"], df_grupos["nombre_grupo"]))
+
                 self.despues(self._actualizar_estado)
             except Exception:
                 pass
@@ -198,6 +219,51 @@ class App(ctk.CTk):
         total = fuerza_a + fuerza_b
         pa_pct = round(fuerza_a / total * 100) if total else 50
         return pa_pct, 100 - pa_pct
+
+    def estimar_turnos(self, pa, pb):
+        """Predice cuantos turnos duraria el combate (modelo de regresion)."""
+        if self.modelo_reg is not None:
+            try:
+                return regresion.predecir_turnos(self.modelo_reg, pa, pb)
+            except Exception:
+                pass
+        return None
+
+    def tipo_de(self, nombre):
+        """Devuelve el tipo del personaje segun el clustering (KMeans)."""
+        return self.tipos.get(nombre, "?")
+
+    def calcular_mllib(self):
+        """
+        Entrena el clasificador de Spark MLlib UNA sola vez, en segundo plano,
+        y guarda su precision en self.precision_mllib (para comparar con sklearn).
+        Marca -1 si Spark no esta disponible en la maquina.
+        """
+        if self.precision_mllib is not None or self._mllib_calculando:
+            return
+        if len(self.personajes) < 2:
+            return
+        self._mllib_calculando = True
+
+        def _run():
+            try:
+                from simulador.generador import guardar_csv
+                from spark import spark_sql_mllib
+                # Generar el CSV con los personajes actuales para que Spark lo lea
+                objetos = [Personaje.from_dict(p) for p in self.personajes]
+                registros = simular_muchos(objetos, n_combates=config.N_COMBATES_MASIVA,
+                                           semilla=config.SEMILLA)
+                guardar_csv(registros, config.RUTA_COMBATES_CSV)
+
+                spark = spark_sql_mllib.crear_spark()
+                prec = spark_sql_mllib.clasificar_con_mllib(config.RUTA_COMBATES_CSV, spark=spark)
+                spark.stop()
+                self.precision_mllib = prec
+            except Exception:
+                self.precision_mllib = -1   # no disponible (sin Spark/Java en la maquina)
+            finally:
+                self._mllib_calculando = False
+        threading.Thread(target=_run, daemon=True).start()
 
     # ----------------------------------------------------------
     #   Utilidades de interfaz
